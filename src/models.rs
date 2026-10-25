@@ -122,6 +122,7 @@ pub struct CliOptions {
     pub dry_run: bool,
     pub list: bool,
     pub off_unused: bool,
+    pub explicit_layout: bool,
 }
 
 impl Default for CliOptions {
@@ -135,6 +136,7 @@ impl Default for CliOptions {
             dry_run: false,
             list: false,
             off_unused: true,
+            explicit_layout: false,
         }
     }
 }

@@ -31,12 +31,15 @@ where
             }
             "--ltr" => {
                 opts.alignment = Alignment::LeftToRight;
+                opts.explicit_layout = true;
             }
             "--rtl" => {
                 opts.alignment = Alignment::RightToLeft;
+                opts.explicit_layout = true;
             }
             "--mirror" | "-m" => {
                 opts.mirror = true;
+                opts.explicit_layout = true;
             }
             "--dry-run" | "-n" => {
                 opts.dry_run = true;
@@ -62,6 +65,7 @@ where
             }
             screen => {
                 opts.screens.push(screen.to_string());
+                opts.explicit_layout = true;
             }
         }
     }
@@ -112,6 +116,7 @@ mod tests {
         assert!(opts.primary.is_none());
         assert!(!opts.dry_run);
         assert!(!opts.list);
+        assert!(opts.explicit_layout);
     }
 
     #[test]
@@ -123,6 +128,7 @@ mod tests {
         assert_eq!(opts.screens, vec!["hdmi", "edp"]);
         assert_eq!(opts.primary.as_deref(), Some("edp"));
         assert!(opts.dry_run);
+        assert!(opts.explicit_layout);
     }
 
     #[test]
@@ -131,6 +137,7 @@ mod tests {
         let opts = parse_args(args).unwrap();
         assert!(opts.mirror);
         assert_eq!(opts.screens, vec!["hdmi", "edp"]);
+        assert!(opts.explicit_layout);
     }
 
     #[test]
@@ -139,5 +146,6 @@ mod tests {
         let opts = parse_args(args).unwrap();
         assert_eq!(opts.primary.as_deref(), Some("hdmi0"));
         assert_eq!(opts.screens, vec!["hdmi0", "edp"]);
+        assert!(opts.explicit_layout);
     }
 }

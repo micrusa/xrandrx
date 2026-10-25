@@ -10,6 +10,39 @@ use models::CliOptions;
 use parser::parse_xrandr_output;
 use planner::create_plan;
 
+/// Formats the current monitor setup in a clean, human-readable overview.
+pub fn format_current_setup(outputs: &[models::Output]) -> String {
+    let mut report = String::new();
+    report.push_str("Connected monitors:\n");
+    let connected: Vec<&models::Output> = outputs.iter().filter(|o| o.connected).collect();
+    if connected.is_empty() {
+        report.push_str("  (none connected)\n");
+    } else {
+        for out in connected {
+            let primary_tag = if out.is_primary { " [primary]" } else { "" };
+            if let Some(ref cur_mode) = out.current_mode {
+                let rate = out
+                    .modes
+                    .iter()
+                    .find(|m| m.is_current)
+                    .map(|m| format!(" @ {:.2}Hz", m.refresh_rate))
+                    .unwrap_or_default();
+                let pos = out
+                    .current_pos
+                    .map(|(x, y)| format!(" at {}x{}", x, y))
+                    .unwrap_or_default();
+                report.push_str(&format!(
+                    "  * {}: {}{}{}{}\n",
+                    out.name, cur_mode, rate, pos, primary_tag
+                ));
+            } else {
+                report.push_str(&format!("  * {}: off{}\n", out.name, primary_tag));
+            }
+        }
+    }
+    report
+}
+
 /// Main application logic executed with a given `XrandrRunner`.
 /// Returns the generated command string upon success.
 pub fn run_app(runner: &dyn XrandrRunner, opts: CliOptions) -> Result<String, String> {
@@ -48,6 +81,12 @@ pub fn run_app(runner: &dyn XrandrRunner, opts: CliOptions) -> Result<String, St
             report.push('\n');
         }
 
+        print!("{}", report);
+        return Ok(report);
+    }
+
+    if !opts.explicit_layout && opts.screens.is_empty() {
+        let report = format_current_setup(&outputs);
         print!("{}", report);
         return Ok(report);
     }

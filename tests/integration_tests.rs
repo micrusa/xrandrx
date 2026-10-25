@@ -49,6 +49,23 @@ DP-1 connected 2560x1440+3840+0 (normal left inverted right x axis y axis) 597mm
 "#;
 
 #[test]
+fn test_default_command_displays_current_setup() {
+    let runner = MockXrandrRunner {
+        mock_query_output: FIXTURE_3_MONITORS.to_string(),
+    };
+
+    let opts = parse_args(Vec::<String>::new()).unwrap();
+    let report = run_app(&runner, opts).unwrap();
+
+    assert!(report.contains("Connected monitors:"));
+    assert!(report.contains("HDMI-1: 1920x1080 @ 60.00Hz at 0x0"));
+    assert!(report.contains("eDP-1: 1920x1080 @ 144.00Hz at 1920x0 [primary]"));
+    assert!(report.contains("DP-1: 1920x1080 @ 60.00Hz at 3840x0"));
+    // Verify it didn't generate an xrandr plan
+    assert!(!report.starts_with("xrandr "));
+}
+
+#[test]
 fn test_equivalence_default_primary_and_best() {
     // "For example: xrandrx --ltr hdmi edp dp == xrandrx --ltr hdmi edp dp --primary edp --best"
     let runner = MockXrandrRunner {
