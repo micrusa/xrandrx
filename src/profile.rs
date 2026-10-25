@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::matcher::match_output;
+use crate::matcher::{get_output_family, match_output};
 use crate::models::{Output, Plan, PlannedOutput};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -275,6 +275,142 @@ pub fn list_profile_names(dir: &Path) -> Vec<String> {
     }
     names.sort();
     names
+}
+
+/// Loads all valid profiles from the profiles directory.
+pub fn load_all_profiles(dir: &Path) -> Result<Vec<Profile>, String> {
+    let names = list_profile_names(dir);
+    if names.is_empty() {
+        return Err(format!("No profiles found in '{}'", dir.display()));
+    }
+
+    let mut profiles = Vec::new();
+    for name in names {
+        let file_path = dir.join(&name);
+        if let Ok(content) = fs::read_to_string(&file_path) {
+            if let Ok(profile) = parse_profile(&content, &name) {
+                profiles.push(profile);
+            }
+        }
+    }
+
+    if profiles.is_empty() {
+        return Err(format!("No valid profiles found in '{}'", dir.display()));
+    }
+
+    Ok(profiles)
+}
+
+/// Selects the best matching profile based on connected displays and mirror constraints.
+/// Ranking priority:
+/// 1. Extended displays prioritised over mirror (unless `mirror_only` is true, which strictly requires mirror)
+/// 2. Monitor count match (e.g. 2 monitors matching profile with 2 monitors)
+/// 3. Output connector type match (hdmi, dp, edp, etc.)
+/// 4. Mode resolution and refresh rate match
+pub fn select_best_profile<'a>(
+    profiles: &'a [Profile],
+    connected_outputs: &[&Output],
+    mirror_only: bool,
+) -> Result<&'a Profile, String> {
+    let candidates: Vec<&Profile> = if mirror_only {
+        profiles.iter().filter(|p| p.mirror).collect()
+    } else {
+        profiles.iter().collect()
+    };
+
+    if candidates.is_empty() {
+        if mirror_only {
+            return Err("No mirroring profiles found for --auto-profile -m".to_string());
+        } else {
+            return Err("No profiles found to auto-select from".to_string());
+        }
+    }
+
+    let n = connected_outputs.len();
+    let connected_cloned: Vec<Output> = connected_outputs.iter().map(|&o| o.clone()).collect();
+    let connected_families: Vec<String> = connected_outputs
+        .iter()
+        .map(|o| get_output_family(&o.name))
+        .collect();
+
+    let mut scored: Vec<((u8, usize, usize, u64, String), &Profile)> = candidates
+        .into_iter()
+        .map(|p| {
+            // 1. Mirror priority (if mirror_only is false, extended is prioritised over mirror)
+            let mirror_penalty = if mirror_only {
+                0
+            } else if p.mirror {
+                1
+            } else {
+                0
+            };
+
+            // 2. Monitor count match (exact count match = 0 diff)
+            let count_diff = if p.outputs.len() == n {
+                0
+            } else {
+                (p.outputs.len() as isize - n as isize).unsigned_abs() + 1
+            };
+
+            // 3. Output type (connector family) match
+            let mut available_families = connected_families.clone();
+            let mut matching_families = 0;
+            for p_out in &p.outputs {
+                let fam = get_output_family(&p_out.name);
+                if let Some(pos) = available_families.iter().position(|f| *f == fam) {
+                    available_families.remove(pos);
+                    matching_families += 1;
+                }
+            }
+            let type_mismatch = n.saturating_sub(matching_families);
+
+            // 4. Resolution and refresh rate match
+            let mut res_rate_penalty: u64 = 0;
+            for p_out in &p.outputs {
+                if let Ok(matched) = match_output(&p_out.name, &connected_cloned) {
+                    let has_mode = matched.modes.iter().any(|m| m.mode_str() == p_out.mode);
+                    if !has_mode {
+                        res_rate_penalty += 1000;
+                    }
+                    if let Some(pref) = matched.modes.iter().find(|m| m.is_preferred) {
+                        if pref.mode_str() != p_out.mode {
+                            res_rate_penalty += 100;
+                        }
+                        if let Some(target_rate) = p_out.rate {
+                            let diff = (pref.refresh_rate - target_rate).abs() as u64;
+                            res_rate_penalty += diff;
+                        }
+                    }
+                } else {
+                    res_rate_penalty += 2000;
+                }
+            }
+
+            let score = (mirror_penalty, count_diff, type_mismatch, res_rate_penalty, p.name.clone());
+            (score, p)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(scored[0].1)
+}
+
+/// Automatically selects and builds a plan for the best matching profile.
+pub fn select_and_load_auto_profile(
+    all_outputs: &[Output],
+    mirror_only: bool,
+    off_unused: bool,
+    dir: &Path,
+) -> Result<(Plan, String), String> {
+    let profiles = load_all_profiles(dir)?;
+    let connected: Vec<&Output> = all_outputs.iter().filter(|o| o.connected).collect();
+    if connected.is_empty() {
+        return Err("No connected displays found to auto-select profile".to_string());
+    }
+
+    let best_profile = select_best_profile(&profiles, &connected, mirror_only)?;
+    let plan = build_plan_from_profile(best_profile, all_outputs, off_unused)?;
+    Ok((plan, best_profile.name.clone()))
 }
 
 /// Loads a profile by name from disk (supporting closest match) and creates an execution Plan.
@@ -584,5 +720,131 @@ mod tests {
         assert_eq!(plan.active_outputs[0].mode.width, 2560);
         assert_eq!(plan.active_outputs[0].mode.height, 1440);
         assert_eq!(plan.active_outputs[0].mode.refresh_rate, 144.0);
+    }
+
+    #[test]
+    fn test_auto_profile_selection_criteria() {
+        let o_hdmi = Output {
+            name: "HDMI-1".to_string(),
+            connected: true,
+            is_primary: false,
+            current_mode: None,
+            current_pos: None,
+            modes: vec![Mode {
+                width: 1920,
+                height: 1080,
+                refresh_rate: 60.0,
+                is_preferred: true,
+                is_current: false,
+            }],
+        };
+        let o_edp = Output {
+            name: "eDP-1".to_string(),
+            connected: true,
+            is_primary: false,
+            current_mode: None,
+            current_pos: None,
+            modes: vec![Mode {
+                width: 1920,
+                height: 1080,
+                refresh_rate: 144.0,
+                is_preferred: true,
+                is_current: false,
+            }],
+        };
+        let connected = vec![&o_hdmi, &o_edp];
+
+        // 1. Monitor count match: single display vs dual displays
+        let p_single = Profile {
+            name: "single_monitor".to_string(),
+            mirror: false,
+            outputs: vec![ProfileOutput {
+                name: "edp".to_string(),
+                mode: "1920x1080".to_string(),
+                rate: Some(144.0),
+                pos: (0, 0),
+                is_primary: true,
+            }],
+        };
+        let p_dual_wrong_type = Profile {
+            name: "dual_dp".to_string(),
+            mirror: false,
+            outputs: vec![
+                ProfileOutput {
+                    name: "dp0".to_string(),
+                    mode: "1920x1080".to_string(),
+                    rate: Some(60.0),
+                    pos: (0, 0),
+                    is_primary: true,
+                },
+                ProfileOutput {
+                    name: "dp1".to_string(),
+                    mode: "1920x1080".to_string(),
+                    rate: Some(60.0),
+                    pos: (1920, 0),
+                    is_primary: false,
+                },
+            ],
+        };
+        let list1 = [p_single.clone(), p_dual_wrong_type.clone()];
+        let best_by_count = select_best_profile(&list1, &connected, false).unwrap();
+        assert_eq!(best_by_count.name, "dual_dp");
+
+        // 2. Output type match: dual dp vs dual hdmi+edp
+        let p_dual_matching_type = Profile {
+            name: "dual_hdmi_edp".to_string(),
+            mirror: false,
+            outputs: vec![
+                ProfileOutput {
+                    name: "hdmi".to_string(),
+                    mode: "1920x1080".to_string(),
+                    rate: Some(60.0),
+                    pos: (0, 0),
+                    is_primary: false,
+                },
+                ProfileOutput {
+                    name: "edp".to_string(),
+                    mode: "1920x1080".to_string(),
+                    rate: Some(144.0),
+                    pos: (1920, 0),
+                    is_primary: true,
+                },
+            ],
+        };
+        let list2 = [p_dual_wrong_type, p_dual_matching_type.clone()];
+        let best_by_type = select_best_profile(&list2, &connected, false).unwrap();
+        assert_eq!(best_by_type.name, "dual_hdmi_edp");
+
+        // 3. Extended prioritised over mirror unless -m is set
+        let p_dual_mirror = Profile {
+            name: "dual_hdmi_edp_mirror".to_string(),
+            mirror: true,
+            outputs: vec![
+                ProfileOutput {
+                    name: "hdmi".to_string(),
+                    mode: "1920x1080".to_string(),
+                    rate: Some(60.0),
+                    pos: (0, 0),
+                    is_primary: false,
+                },
+                ProfileOutput {
+                    name: "edp".to_string(),
+                    mode: "1920x1080".to_string(),
+                    rate: Some(60.0),
+                    pos: (0, 0),
+                    is_primary: true,
+                },
+            ],
+        };
+
+        // Without -m: extended profile wins
+        let list3 = [p_dual_mirror.clone(), p_dual_matching_type.clone()];
+        let best_no_m = select_best_profile(&list3, &connected, false).unwrap();
+        assert_eq!(best_no_m.name, "dual_hdmi_edp");
+
+        // With -m: mirror profile wins
+        let list4 = [p_dual_mirror.clone(), p_dual_matching_type];
+        let best_with_m = select_best_profile(&list4, &connected, true).unwrap();
+        assert_eq!(best_with_m.name, "dual_hdmi_edp_mirror");
     }
 }

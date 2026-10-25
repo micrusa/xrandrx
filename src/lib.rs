@@ -107,6 +107,19 @@ pub fn run_app(runner: &dyn XrandrRunner, opts: CliOptions) -> Result<String, St
         return Ok(cmd_str);
     }
 
+    if opts.auto_profile {
+        let profiles_dir = profile::get_profiles_dir();
+        let (plan, matched_name) = profile::select_and_load_auto_profile(&outputs, opts.mirror, opts.off_unused, &profiles_dir)?;
+        let cmd_str = plan.to_command_string();
+        if opts.dry_run {
+            println!("[dry-run] Auto-selected profile '{}': {}", matched_name, cmd_str);
+        } else {
+            println!("Auto-selected profile '{}': {}", matched_name, cmd_str);
+            runner.apply(&plan.to_xrandr_args())?;
+        }
+        return Ok(cmd_str);
+    }
+
     if !opts.explicit_layout && opts.screens.is_empty() {
         let report = format_current_setup(&outputs);
         print!("{}", report);

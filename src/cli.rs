@@ -80,6 +80,9 @@ where
                 }
                 opts.profile = Some(val);
             }
+            "--auto-profile" | "-ap" => {
+                opts.auto_profile = true;
+            }
             "--primary" => {
                 let next_val = iter.next().ok_or_else(|| {
                     "Option '--primary' requires an argument (monitor name/alias)".to_string()
@@ -116,6 +119,8 @@ EXAMPLES:
     xrandrx
     xrandrx --save-profile work
     xrandrx -p work
+    xrandrx --auto-profile
+    xrandrx -ap -m
     xrandrx --ltr hdmi edp dp
     xrandrx --rtl dp edp hdmi
     xrandrx --mirror hdmi edp
@@ -126,6 +131,7 @@ EXAMPLES:
 OPTIONS:
     --save-profile <NAME>  Save existing display configuration to profile
     --profile, -p <NAME>   Load and apply profile (flexible/closest matching)
+    --auto-profile, -ap    Auto-select best matching profile based on connected displays
     --ltr                  Align screens Left to Right (default)
     --rtl                  Align screens Right to Left
     --mirror, -m           Mirror screens (clone mode)
@@ -157,6 +163,7 @@ mod tests {
         assert!(opts.explicit_layout);
         assert!(opts.save_profile.is_none());
         assert!(opts.profile.is_none());
+        assert!(!opts.auto_profile);
     }
 
     #[test]
@@ -202,5 +209,14 @@ mod tests {
         let args3 = vec!["--save-profile", "myprof"];
         let opts3 = parse_args(args3).unwrap();
         assert_eq!(opts3.save_profile.as_deref(), Some("myprof"));
+
+        let args4 = vec!["--auto-profile", "-m"];
+        let opts4 = parse_args(args4).unwrap();
+        assert!(opts4.auto_profile);
+        assert!(opts4.mirror);
+
+        let args5 = vec!["-ap"];
+        let opts5 = parse_args(args5).unwrap();
+        assert!(opts5.auto_profile);
     }
 }

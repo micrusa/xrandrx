@@ -299,3 +299,73 @@ fn test_save_and_load_profile_exact_and_closest_match() {
         assert_eq!(cmd, cmd_fuzzy);
     });
 }
+
+#[test]
+fn test_auto_profile_flag_selection() {
+    with_temp_profiles_dir(|profiles_dir| {
+        // Save profile for 2 monitors: DP-0 and DP-1
+        let p_dual = r#"# xrandrx profile
+mirror = false
+
+[output.DP-0]
+primary = true
+mode = 1920x1080
+rate = 60.00
+pos = 0x0
+
+[output.DP-1]
+primary = false
+mode = 1920x1080
+rate = 60.00
+pos = 1920x0
+"#;
+        std::fs::write(profiles_dir.join("dual_dp"), p_dual).unwrap();
+
+        // Save profile for 4 monitors: DP-0, DP-1, DP-2, DP-3
+        let p_quad = r#"# xrandrx profile
+mirror = false
+
+[output.DP-0]
+primary = false
+mode = 1920x1080
+rate = 60.00
+pos = 0x0
+
+[output.DP-1]
+primary = false
+mode = 1920x1080
+rate = 60.00
+pos = 1920x0
+
+[output.DP-2]
+primary = true
+mode = 2560x1440
+rate = 144.00
+pos = 3840x0
+
+[output.DP-3]
+primary = false
+mode = 1920x1080
+rate = 60.00
+pos = 6400x0
+"#;
+        std::fs::write(profiles_dir.join("quad_dp"), p_quad).unwrap();
+
+        // Now run against FIXTURE_4_MONITORS (which has 4 monitors)
+        let runner = MockXrandrRunner {
+            mock_query_output: FIXTURE_4_MONITORS.to_string(),
+        };
+
+        let opts = parse_args(vec!["--auto-profile", "--dry-run"]).unwrap();
+        let cmd = run_app(&runner, opts).unwrap();
+
+        // quad_dp should be auto-selected because 4 monitors match 4 monitors!
+        assert!(cmd.contains("--output DP-2 --mode 2560x1440 --rate 144.00 --pos 3840x0 --primary"));
+        assert!(cmd.contains("--output DP-3 --mode 1920x1080 --rate 60.00 --pos 6400x0"));
+
+        // Also test with alias -ap
+        let opts_ap = parse_args(vec!["-ap", "--dry-run"]).unwrap();
+        let cmd_ap = run_app(&runner, opts_ap).unwrap();
+        assert_eq!(cmd, cmd_ap);
+    });
+}
