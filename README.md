@@ -15,6 +15,20 @@ A vibe-coded lightweight, zero-dependency CLI extension for `xrandr` to manage m
 ## Usage
 
 ```bash
+# View current setup (connected monitors, positions, resolutions, refresh rates)
+xrandrx
+
+# Save current display setup to a profile
+xrandrx --save-profile work
+
+# Load a profile (flexible name matching and resolution fallback)
+xrandrx -p work
+xrandrx -p wo
+
+# Automatically select and apply the best matching profile
+xrandrx -ap
+xrandrx -ap -m
+
 # Arrange screens left-to-right (default: best quality, center screen primary)
 xrandrx --ltr hdmi edp dp
 
@@ -36,6 +50,13 @@ xrandrx --list
 
 > **Note:** `xrandrx --ltr hdmi edp dp` is equivalent to `xrandrx --ltr hdmi edp dp --primary edp --best`.
 
+## Profiles
+
+Profiles are stored under `~/.config/xrandrx/profiles/{profile}`.
+- **Save**: `xrandrx --save-profile <name>` saves the current multi-monitor layout.
+- **Load**: `xrandrx -p <name>` / `--profile <name>` loads a profile with closest-name matching (e.g. `-p myp` matches `myprofilename`) and falls back to preferred modes if a resolution is unavailable.
+- **Auto-select**: `xrandrx -ap` / `--auto-profile` chooses the best profile matching connected displays (monitor count, connector types, and resolution), prioritizing extended setups over mirror (unless `-m` is specified).
+
 ## Monitor Aliases
 
 - Exact output names work: `HDMI-0-1`, `eDP-1`, `DP-1`.
@@ -48,6 +69,9 @@ xrandrx --list
 
 | Option | Description |
 |---|---|
+| `--save-profile <NAME>` | Save current display layout as a profile. |
+| `--profile <NAME>`, `-p` | Load and apply profile (closest name match, fallback to preferred mode). |
+| `--auto-profile`, `-ap` | Auto-apply best matching profile for connected monitors. |
 | `--ltr` | Align screens Left-to-Right (default). |
 | `--rtl` | Align screens Right-to-Left. |
 | `--mirror`, `-m` | Mirror screens (clone mode). |
@@ -57,3 +81,4 @@ xrandrx --list
 | `--list`, `-l` | Show detected monitors and resolutions. |
 | `--keep-others` | Keep unselected connected displays on (default turns them off). |
 | `-h`, `--help` | Show help. |
+| `-v`, `--version` | Show version. |
