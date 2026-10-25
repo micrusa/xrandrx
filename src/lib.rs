@@ -4,6 +4,7 @@ pub mod matcher;
 pub mod models;
 pub mod parser;
 pub mod planner;
+pub mod profile;
 
 use executor::XrandrRunner;
 use models::CliOptions;
@@ -83,6 +84,27 @@ pub fn run_app(runner: &dyn XrandrRunner, opts: CliOptions) -> Result<String, St
 
         print!("{}", report);
         return Ok(report);
+    }
+
+    if let Some(ref pname) = opts.save_profile {
+        let profiles_dir = profile::get_profiles_dir();
+        let path = profile::save_current_profile(&outputs, pname, &profiles_dir)?;
+        let msg = format!("Saved profile '{}' to {}", pname, path.display());
+        println!("{}", msg);
+        return Ok(msg);
+    }
+
+    if let Some(ref pname) = opts.profile {
+        let profiles_dir = profile::get_profiles_dir();
+        let (plan, matched_name) = profile::load_profile_plan(&outputs, pname, opts.off_unused, &profiles_dir)?;
+        let cmd_str = plan.to_command_string();
+        if opts.dry_run {
+            println!("[dry-run] Applying profile '{}': {}", matched_name, cmd_str);
+        } else {
+            println!("Applying profile '{}': {}", matched_name, cmd_str);
+            runner.apply(&plan.to_xrandr_args())?;
+        }
+        return Ok(cmd_str);
     }
 
     if !opts.explicit_layout && opts.screens.is_empty() {

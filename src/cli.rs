@@ -47,7 +47,40 @@ where
             "--keep-others" | "--no-off" => {
                 opts.off_unused = false;
             }
-            "--primary" | "-p" => {
+            "--save-profile" => {
+                let next_val = iter.next().ok_or_else(|| {
+                    "Option '--save-profile' requires a profile name".to_string()
+                })?;
+                opts.save_profile = Some(next_val);
+            }
+            s if s.starts_with("--save-profile=") => {
+                let val = s["--save-profile=".len()..].to_string();
+                if val.is_empty() {
+                    return Err("Option '--save-profile' requires a profile name".to_string());
+                }
+                opts.save_profile = Some(val);
+            }
+            "--profile" | "-p" => {
+                let next_val = iter.next().ok_or_else(|| {
+                    "Option '--profile' requires a profile name".to_string()
+                })?;
+                opts.profile = Some(next_val);
+            }
+            s if s.starts_with("--profile=") => {
+                let val = s["--profile=".len()..].to_string();
+                if val.is_empty() {
+                    return Err("Option '--profile' requires a profile name".to_string());
+                }
+                opts.profile = Some(val);
+            }
+            s if s.starts_with("-p=") => {
+                let val = s["-p=".len()..].to_string();
+                if val.is_empty() {
+                    return Err("Option '-p' requires a profile name".to_string());
+                }
+                opts.profile = Some(val);
+            }
+            "--primary" => {
                 let next_val = iter.next().ok_or_else(|| {
                     "Option '--primary' requires an argument (monitor name/alias)".to_string()
                 })?;
@@ -80,6 +113,9 @@ USAGE:
     xrandrx [OPTIONS] [SCREENS...]
 
 EXAMPLES:
+    xrandrx
+    xrandrx --save-profile work
+    xrandrx -p work
     xrandrx --ltr hdmi edp dp
     xrandrx --rtl dp edp hdmi
     xrandrx --mirror hdmi edp
@@ -88,16 +124,18 @@ EXAMPLES:
     xrandrx --list
 
 OPTIONS:
-    --ltr                Align screens Left to Right (default)
-    --rtl                Align screens Right to Left
-    --mirror, -m         Mirror screens (clone mode)
-    --best               Select maximum resolution & refresh rate (default: on)
-    --primary <SCREEN>   Specify primary display (default: center screen)
-    --dry-run, -n        Print xrandr command without applying changes
-    --list, -l           List connected monitors and their available modes
-    --keep-others        Do not turn off unselected connected displays
-    -h, --help           Show help information
-    -v, --version        Show version
+    --save-profile <NAME>  Save existing display configuration to profile
+    --profile, -p <NAME>   Load and apply profile (flexible/closest matching)
+    --ltr                  Align screens Left to Right (default)
+    --rtl                  Align screens Right to Left
+    --mirror, -m           Mirror screens (clone mode)
+    --best                 Select maximum resolution & refresh rate (default: on)
+    --primary <SCREEN>     Specify primary display (default: center screen)
+    --dry-run, -n          Print xrandr command without applying changes
+    --list, -l             List connected monitors and their available modes
+    --keep-others          Do not turn off unselected connected displays
+    -h, --help             Show help information
+    -v, --version          Show version
 "#);
 }
 
@@ -117,6 +155,8 @@ mod tests {
         assert!(!opts.dry_run);
         assert!(!opts.list);
         assert!(opts.explicit_layout);
+        assert!(opts.save_profile.is_none());
+        assert!(opts.profile.is_none());
     }
 
     #[test]
@@ -147,5 +187,20 @@ mod tests {
         assert_eq!(opts.primary.as_deref(), Some("hdmi0"));
         assert_eq!(opts.screens, vec!["hdmi0", "edp"]);
         assert!(opts.explicit_layout);
+    }
+
+    #[test]
+    fn test_parse_args_profile() {
+        let args = vec!["-p", "work"];
+        let opts = parse_args(args).unwrap();
+        assert_eq!(opts.profile.as_deref(), Some("work"));
+
+        let args2 = vec!["--profile=home"];
+        let opts2 = parse_args(args2).unwrap();
+        assert_eq!(opts2.profile.as_deref(), Some("home"));
+
+        let args3 = vec!["--save-profile", "myprof"];
+        let opts3 = parse_args(args3).unwrap();
+        assert_eq!(opts3.save_profile.as_deref(), Some("myprof"));
     }
 }

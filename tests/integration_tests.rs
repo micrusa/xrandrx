@@ -2,6 +2,26 @@ use xrandrx::cli::parse_args;
 use xrandrx::executor::MockXrandrRunner;
 use xrandrx::run_app;
 
+static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn with_temp_profiles_dir<F: FnOnce(&std::path::Path)>(f: F) {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!("xrandrx_test_profiles_{}", unique_id));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    unsafe {
+        std::env::set_var("XRANDRX_PROFILES_DIR", &temp_dir);
+    }
+    f(&temp_dir);
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    unsafe {
+        std::env::remove_var("XRANDRX_PROFILES_DIR");
+    }
+}
+
 const FIXTURE_3_MONITORS: &str = r#"
 Screen 0: minimum 320 x 200, current 5760 x 1080, maximum 16384 x 16384
 HDMI-1 connected 1920x1080+0+0 (normal left inverted right x axis y axis) 527mm x 296mm
@@ -251,4 +271,31 @@ fn test_mirror_mode() {
     assert!(cmd.contains("--output eDP-1 --mode 1920x1080 --rate 144.00 --pos 0x0"));
     assert!(cmd.contains("--same-as"));
     assert!(cmd.contains("--output DP-1 --off"));
+}
+
+#[test]
+fn test_save_and_load_profile_exact_and_closest_match() {
+    with_temp_profiles_dir(|profiles_dir| {
+        let runner = MockXrandrRunner {
+            mock_query_output: FIXTURE_3_MONITORS.to_string(),
+        };
+
+        // 1. Save profile with name "myprofilename"
+        let save_opts = parse_args(vec!["--save-profile", "myprofilename"]).unwrap();
+        let save_res = run_app(&runner, save_opts).unwrap();
+        assert!(save_res.contains("Saved profile 'myprofilename'"));
+        assert!(profiles_dir.join("myprofilename").exists());
+
+        // 2. Load with exact name
+        let load_opts = parse_args(vec!["--profile", "myprofilename", "--dry-run"]).unwrap();
+        let cmd = run_app(&runner, load_opts).unwrap();
+        assert!(cmd.contains("--output HDMI-1 --mode 1920x1080 --rate 60.00 --pos 0x0"));
+        assert!(cmd.contains("--output eDP-1 --mode 1920x1080 --rate 144.00 --pos 1920x0 --primary"));
+        assert!(cmd.contains("--output DP-1 --mode 1920x1080 --rate 60.00 --pos 3840x0"));
+
+        // 3. Load with prefix/fuzzy name: -p myp -> should choose myprofilename
+        let fuzzy_opts = parse_args(vec!["-p", "myp", "--dry-run"]).unwrap();
+        let cmd_fuzzy = run_app(&runner, fuzzy_opts).unwrap();
+        assert_eq!(cmd, cmd_fuzzy);
+    });
 }

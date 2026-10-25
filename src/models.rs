@@ -123,6 +123,9 @@ pub struct CliOptions {
     pub list: bool,
     pub off_unused: bool,
     pub explicit_layout: bool,
+    pub save_profile: Option<String>,
+    pub profile: Option<String>,
+    pub auto_profile: bool,
 }
 
 impl Default for CliOptions {
@@ -137,6 +140,9 @@ impl Default for CliOptions {
             list: false,
             off_unused: true,
             explicit_layout: false,
+            save_profile: None,
+            profile: None,
+            auto_profile: false,
         }
     }
 }
